@@ -2,8 +2,8 @@ import asyncio
 import os
 import sys
 from pathlib import Path
-import re # Added for parsing username
-import csv # Added for CSV output
+import re  # Added for parsing usernames
+import csv  # Added for CSV output
 
 from loguru import logger
 from telethon import TelegramClient, functions, types
@@ -20,90 +20,119 @@ logger.add(
 # --- Topic Keywords (Example) ---
 # You can expand this dictionary with more topics and keywords
 TOPIC_KEYWORDS = {
-    "Криптовалюты/Финансы": ["крипт", "crypto", "p2p", "трейд", "инвест", "финанс", "binance", "бинанс", "trade", "invest", "finance", "nft", "нфт", "usdt", "btc", "eth"],
-    "Новости/Медиа": ["новост", "news", "сми", "медиа", "media", "журнал"],
-    "Технологии/IT": ["tech", "техно", "it", "айти", "разработ", "программ", "dev", "код", "code"],
-    "Маркетинг/Бизнес": ["маркет", "бизнес", "business", "реклам", "пиар", "pr", "продаж", "sale"],
-    "Образование": ["образ", "обучен", "курс", "урок", "школа", "school", "educat"],
+    "Криптовалюты/Финансы": [
+        "крипт", "crypto", "p2p", "трейд", "инвест", "финанс",
+        "binance", "бинанс", "trade", "invest", "finance",
+        "nft", "нфт", "usdt", "btc", "eth"
+    ],
+    "Новости/Медиа": [
+        "новост", "news", "сми", "медиа", "media", "журнал"
+    ],
+    "Технологии/IT": [
+        "tech", "техно", "it", "айти", "разработ", "программ",
+        "dev", "код", "code"
+    ],
+    "Маркетинг/Бизнес": [
+        "маркет", "бизнес", "business", "реклам", "пиар",
+        "pr", "продаж", "sale"
+    ],
+    "Образование": [
+        "образ", "обучен", "курс", "урок", "школа",
+        "school", "educat"
+    ],
     # Add more topics and keywords here
 }
 
+
 def get_channel_topic(title: str) -> str:
-    """Determines channel topic based on keywords in the title."""
+    """
+    Determines channel topic based on keywords in the title.
+    """
     if not title:
         return "Не определена"
-    
-    title_lower = title.lower() # Convert title to lowercase for case-insensitive matching
+
+    title_lower = title.lower()
     for topic, keywords in TOPIC_KEYWORDS.items():
         for keyword in keywords:
-            # Use word boundaries (\b) to avoid partial matches (e.g., 'invest' in 'investigation')
-            # Handle potential regex errors in keywords if needed
             try:
-                if re.search(r'\b' + re.escape(keyword) + r'\b', title_lower):
+                # Use word boundaries to avoid partial matches
+                if re.search(r"\b" + re.escape(keyword) + r"\b", title_lower):
                     return topic
             except re.error:
-                # Fallback to simple substring check if regex fails for a keyword
+                # Fallback to simple substring check if regex fails
                 if keyword in title_lower:
-                     return topic
+                    return topic
 
-    return "Не определена" # Return default if no keywords match
+    return "Не определена"
 
-# --- Helper function to build regex pattern from format string ---
+
+# --- Helper functions for parsing config.LINE_FORMAT lines ---
+
+
 def build_regex_pattern(format_string: str) -> str:
-    """Builds a regex pattern to parse lines based on the format string."""
-    # 1. Escape the format string to treat delimiters literally
+    """
+    Builds a regex pattern to parse lines based on the format string.
+    """
+    # 1. Escape the format string so that delimiters are literal
     pattern_str = re.escape(format_string)
     # 2. Replace escaped placeholders with named regex capture groups
-    pattern_str = pattern_str.replace(r'\{username\}', r'(?P<username>[\w]+)')
-    pattern_str = pattern_str.replace(r'\{participants_count\}', r'(?P<participants_count>\d*)')
-    pattern_str = pattern_str.replace(r'\{title\}', r'(?P<title>.*)')
-    # Replace any other potential generic placeholders
-    pattern_str = re.sub(r'\\{.*?\\}', r'.*?', pattern_str)
+    pattern_str = pattern_str.replace(r"\{username\}", r"(?P<username>[\w]+)")
+    pattern_str = pattern_str.replace(r"\{participants_count\}", r"(?P<participants_count>\d*)")
+    pattern_str = pattern_str.replace(r"\{title\}", r"(?P<title>.*)")
+    # Replace any other potential generic placeholders with a wildcard
+    pattern_str = re.sub(r"\\\{.*?\\\}", r".*?", pattern_str)
     # Add anchors to match the whole line
     return f"^{pattern_str}$"
 
-# --- Helper function to parse username from the formatted line ---
+
 def parse_username_from_line(line: str, format_string: str) -> str | None:
-    """Parses the username from a line formatted according to config.LINE_FORMAT."""
+    """
+    Parses the username from a line formatted according to config.LINE_FORMAT.
+    Returns the 'username' group or None if no match.
+    """
     try:
         pattern = build_regex_pattern(format_string)
         match = re.match(pattern, line, re.IGNORECASE)
         if match:
-            return match.group('username')
+            return match.group("username")
         return None
     except re.error as e:
-        logger.error(f"Regex error during username parsing line '{line}' with format '{format_string}': {e}")
+        logger.error(f"Regex error parsing username from line '{line}': {e}")
         return None
     except Exception as e:
-        logger.error(f"Unexpected error in parse_username_from_line for line '{line}': {e}")
+        logger.error(f"Unexpected error in parse_username_from_line: {e}")
         return None
 
-# --- Helper function to parse a line into a dictionary ---
+
 def parse_line_to_dict(line: str, format_string: str) -> dict | None:
-    """Parses a line formatted according to config.LINE_FORMAT into a dictionary."""
+    """
+    Parses a line formatted according to config.LINE_FORMAT into a dictionary:
+    { 'username': str, 'participants_count': int, 'title': str }
+    """
     try:
         pattern = build_regex_pattern(format_string)
-        match = re.match(pattern, line, re.IGNORECASE | re.DOTALL) # Use DOTALL in case title has newlines
+        match = re.match(pattern, line, re.IGNORECASE | re.DOTALL)
         if match:
             data = {
-                'username': match.group('username') or None,
-                'participants_count': match.group('participants_count') or '0',
-                'title': match.group('title') or 'N/A'
+                "username": match.group("username") or None,
+                "participants_count": match.group("participants_count") or "0",
+                "title": match.group("title") or "N/A"
             }
             try:
-                count_str = data['participants_count']
-                data['participants_count'] = int(count_str) if count_str else 0
+                data["participants_count"] = int(data["participants_count"])
             except (ValueError, TypeError):
-                data['participants_count'] = 0
+                data["participants_count"] = 0
             return data
         return None
     except re.error as e:
-        logger.error(f"Regex error during dict parsing line '{line}' with format '{format_string}': {e}")
+        logger.error(f"Regex error parsing line to dict '{line}': {e}")
         return None
     except Exception as e:
-        logger.error(f"Unexpected error in parse_line_to_dict for line '{line}': {e}")
+        logger.error(f"Unexpected error in parse_line_to_dict: {e}")
         return None
-# --- End Helper functions ---
+
+
+# --- End of helper functions ---
 
 
 class SimilarChannelParser:
@@ -135,130 +164,145 @@ class SimilarChannelParser:
         )
         self.is_connected = False
 
-    async def connect(self):
-         """Connects the client if not already connected."""
-         if not self.is_connected:
+    async def connect(self, bot_token: str | None = None):
+        """
+        Connects the TelegramClient.
+        If bot_token is provided, authorizes as a bot (no phone/code prompt).
+        Otherwise, attempts user login (phone + code).
+        """
+        if not self.is_connected:
             logger.info("Connecting to Telegram...")
             try:
                 if not self.client.is_connected():
                     await self.client.connect()
-                if not await self.client.is_user_authorized():
-                     logger.info("First run or session expired: Please log in to your Telegram account.")
-                     await self.client.start()
-                     logger.info("Authorization successful.")
+
+                if bot_token:
+                    # Authorize as bot using bot_token
+                    await self.client.start(bot_token=bot_token)
+                    logger.info("Authorized as bot successfully.")
+                else:
+                    # Authorize as user
+                    if not await self.client.is_user_authorized():
+                        logger.info("First run or session expired: please log in (phone + code).")
+                        await self.client.start()  # will prompt for phone+code
+                        logger.info("User authorization successful.")
                 self.is_connected = True
                 logger.info("Telegram client connected successfully.")
             except Exception as e:
-                 logger.error(f"Failed to connect or authorize Telegram client: {e}")
-                 raise
+                logger.error(f"Failed to connect/authorize Telegram client: {e}")
+                raise
 
     async def get_similar_channels(self, channel_entity: str) -> list[str]:
-        """Fetches similar channels for a given channel entity."""
+        """
+        Fetches similar channels for a given channel_entity (username or link).
+        Returns a list of formatted strings according to config.LINE_FORMAT.
+        """
         if not self.is_connected:
-             await self.connect()
+            # By default, connect as bot if BOT_TOKEN is set
+            if config.BOT_TOKEN:
+                await self.connect(bot_token=config.BOT_TOKEN)
+            else:
+                await self.connect(bot_token=None)
 
         logger.info(f'Start parsing similar channels of "{channel_entity}"...')
+
         try:
             peer = channel_entity
             req = functions.channels.GetChannelRecommendationsRequest(channel=peer)
             res: types.messages.Chats = await self.client(req)
         except (ValueError, TypeError) as e:
-            logger.error(f'Error fetching recommendations for "{channel_entity}": {e}. Input might be invalid, private, or not a channel.')
+            logger.error(f'Error fetching recommendations for "{channel_entity}": {e}')
             return []
         except (types.errors.ChannelPrivateError, types.errors.ChatAdminRequiredError) as e:
-             logger.warning(f'Cannot access recommendations for "{channel_entity}": Channel is private or requires admin rights. {e}')
-             return []
+            logger.warning(f'Cannot access recommendations for "{channel_entity}": {e}')
+            return []
         except types.errors.FloodWaitError as e:
-             logger.warning(f"Flood wait error for {channel_entity}: waiting {e.seconds} seconds.")
-             await asyncio.sleep(e.seconds + 1)
-             return []
+            logger.warning(f"Flood wait for {channel_entity}: wait {e.seconds}s")
+            await asyncio.sleep(e.seconds + 1)
+            return []
         except Exception as e:
-             logger.error(f'An unexpected error occurred fetching recommendations for "{channel_entity}": {type(e).__name__} - {e}')
-             return []
+            logger.error(f'Unexpected error fetching recommendations for "{channel_entity}": {type(e).__name__} - {e}')
+            return []
 
         channels: list[str] = []
-        if not hasattr(res, 'chats'):
-             logger.warning(f"No 'chats' attribute found in the response for {channel_entity}. Response: {res}")
-             return []
+        if not hasattr(res, "chats"):
+            logger.warning(f"No 'chats' in response for {channel_entity}: {res}")
+            return []
 
         for chat in res.chats:
-             if isinstance(chat, (types.Channel)) and \
-                hasattr(chat, 'username') and chat.username and \
-                hasattr(chat, 'participants_count') and \
-                hasattr(chat, 'title'):
-                 try:
-                     channels.append(config.LINE_FORMAT.format(
-                         username=chat.username,
-                         participants_count=getattr(chat, 'participants_count', 0),
-                         title=getattr(chat, 'title', 'N/A'),
-                     ))
-                 except KeyError as e:
-                     logger.warning(f"Missing key {e} in chat object for formatting: {chat.title}. Skipping.")
-                 except Exception as e:
-                     logger.error(f"Error formatting chat {getattr(chat, 'title', 'N/A')}: {e}. Skipping.")
-             else:
-                 logger.warning(f"Skipping item because it's not a channel with required attributes: {getattr(chat, 'title', 'N/A')} (Type: {type(chat)})")
+            if (
+                isinstance(chat, types.Channel)
+                and getattr(chat, "username", None)
+                and hasattr(chat, "participants_count")
+                and hasattr(chat, "title")
+            ):
+                try:
+                    channels.append(config.LINE_FORMAT.format(
+                        username=chat.username,
+                        participants_count=getattr(chat, "participants_count", 0),
+                        title=getattr(chat, "title", "N/A"),
+                    ))
+                except KeyError as e:
+                    logger.warning(f"Missing key {e} when formatting channel {chat.title}. Skipping.")
+                except Exception as e:
+                    logger.error(f"Error formatting channel {chat.title}: {e}. Skipping.")
+            else:
+                logger.warning(
+                    f"Skipping item (not a full channel) for {getattr(chat, 'title', 'N/A')} (type: {type(chat)})"
+                )
 
         count = getattr(res, "count", len(channels))
-        log_text = f'Parsed {len(channels)}/{count if count else len(channels)} similar channels for "{channel_entity}". '
-        if hasattr(res, 'count') and len(channels) < res.count:
-            log_text += f"You may need Telegram Premium to get all {res.count} channels."
+        log_text = f'Parsed {len(channels)}/{count if count else len(channels)} similar channels for "{channel_entity}".'
+        if hasattr(res, "count") and len(channels) < res.count:
+            log_text += f" You may need Telegram Premium to get all {res.count}."
         logger.success(log_text)
         return channels
 
     async def main(self):
-        """Main function to handle user input and parsing levels."""
+        """
+        Main function to handle CLI input (Level 1 and Level 2 parsing) if run standalone.
+        """
         saving_dir_base = Path(config.SAVING_DIRECTORY)
         saving_dir_base.mkdir(exist_ok=True)
 
         if not saving_dir_base.is_dir():
-             logger.error(
-                 f"Could not create or find directory {saving_dir_base.as_posix()} to save chats in. "
-                 "Please check permissions or change SAVING_DIRECTORY in config.py."
-             )
-             sys.exit(1)
+            logger.error(
+                f"Could not create/find directory {saving_dir_base}. Check permissions or change SAVING_DIRECTORY."
+            )
+            sys.exit(1)
 
         try:
-            await self.connect()
+            # Connect as user if BOT_TOKEN isn't provided
+            if config.BOT_TOKEN:
+                await self.connect(bot_token=config.BOT_TOKEN)
+            else:
+                await self.connect(bot_token=None)
 
             while True:
                 channel_username_l0 = input(
-                    "\nPlease input the initial channel username (e.g., @channelname or channelname, leave empty to stop): "
+                    "\nEnter initial channel username (e.g., @channelname or channelname; leave empty to exit): "
                 ).strip()
-
                 if not channel_username_l0:
                     logger.info("Exiting.")
                     break
 
-                # --- Level 1 Parsing ---
-                logger.info(f"--- Starting Level 1 Parsing for: {channel_username_l0} ---")
+                logger.info(f"--- Level 1 Parsing for: {channel_username_l0} ---")
                 channels_l1 = await self.get_similar_channels(channel_username_l0)
 
-                safe_filename_l0 = channel_username_l0.lstrip('@').replace('/', '_').replace('\\', '_')
+                safe_filename_l0 = channel_username_l0.lstrip("@").replace("/", "_").replace("\\", "_")
                 saving_file_l1 = (saving_dir_base / f"{safe_filename_l0}_level1").with_suffix(".txt")
 
                 if not channels_l1:
-                    logger.warning(f"No similar channels found or parsed for {channel_username_l0}. Skipping Level 2.")
-                    try:
-                        saving_file_l1.write_text("", encoding='utf-8')
-                        logger.info(f"Level 1: Empty results file created at '{saving_file_l1}'.")
-                    except Exception as e:
-                        logger.error(f"Failed to write empty Level 1 results file {saving_file_l1}: {e}")
+                    logger.warning(f"No Level 1 results for {channel_username_l0}. Skipping Level 2.")
+                    saving_file_l1.write_text("", encoding="utf-8")
+                    logger.info(f"Created empty Level 1 file: {saving_file_l1}")
                     continue
 
-                try:
-                    saving_file_l1.write_text("\n".join(channels_l1), encoding='utf-8')
-                    logger.success(
-                        f'Level 1: {len(channels_l1)} similar channels saved to "{saving_file_l1}" in format "{config.LINE_FORMAT}".\n'
-                    )
-                except Exception as e:
-                     logger.error(f"Failed to save Level 1 results to {saving_file_l1}: {e}")
-                     continue
+                saving_file_l1.write_text("\n".join(channels_l1), encoding="utf-8")
+                logger.success(f"Level 1: {len(channels_l1)} saved to {saving_file_l1}.")
 
-
-                # --- Level 2 Parsing ---
-                logger.info(f"--- Starting Level 2 Parsing (based on results from {channel_username_l0}) ---")
-
+                # Level 2 parsing
+                logger.info(f"--- Level 2 Parsing for: {channel_username_l0} ---")
                 level2_data_for_csv = []
                 usernames_l1 = []
                 for line in channels_l1:
@@ -266,132 +310,127 @@ class SimilarChannelParser:
                     if username:
                         usernames_l1.append(username)
                     else:
-                         logger.warning(f"Could not extract username for level 2 parsing from line: '{line}'")
+                        logger.warning(f"Could not extract username from '{line}'")
 
                 if not usernames_l1:
-                     logger.warning(f"No valid usernames extracted from Level 1 results of {channel_username_l0} to perform Level 2 parsing.")
-                     continue
-
-                logger.info(f"Found {len(usernames_l1)} channels from Level 1 to parse for Level 2.")
+                    logger.warning(f"No valid usernames for Level 2 from {channel_username_l0}.")
+                    continue
 
                 parsed_l2_count = 0
-                total_l2_channels_found = 0
+                total_l2_found = 0
                 for i, channel_username_l1 in enumerate(usernames_l1, 1):
-                    channel_entity_l1 = channel_username_l1 if channel_username_l1.startswith('@') else f"@{channel_username_l1}"
+                    peer_l1 = channel_username_l1 if channel_username_l1.startswith("@") else f"@{channel_username_l1}"
+                    logger.info(f"--- Level 2 ({i}/{len(usernames_l1)}): {peer_l1} ---")
 
-                    logger.info(f"--- Level 2 Parsing ({i}/{len(usernames_l1)}): Starting for {channel_entity_l1} ---")
-                    channels_l2 = await self.get_similar_channels(channel_entity_l1)
+                    channels_l2 = await self.get_similar_channels(peer_l1)
                     parsed_l2_count += 1
-                    total_l2_channels_found += len(channels_l2)
+                    total_l2_found += len(channels_l2)
 
                     if channels_l2:
-                        logger.info(f"Parsing {len(channels_l2)} L2 results from {channel_entity_l1} for CSV...")
                         for line_l2 in channels_l2:
                             parsed_data = parse_line_to_dict(line_l2, config.LINE_FORMAT)
                             if parsed_data:
                                 level2_data_for_csv.append({
-                                    'source_l1': channel_username_l1,
-                                    'found_l2_username': parsed_data.get('username', 'N/A'),
-                                    'found_l2_count': parsed_data.get('participants_count', 0),
-                                    'found_l2_title': parsed_data.get('title', 'N/A')
+                                    "source_l1": channel_username_l1,
+                                    "found_l2_username": parsed_data.get("username", "N/A"),
+                                    "found_l2_count": parsed_data.get("participants_count", 0),
+                                    "found_l2_title": parsed_data.get("title", "N/A")
                                 })
                             else:
-                                logger.warning(f"Failed to parse L2 line for CSV: '{line_l2}'")
+                                logger.warning(f"Failed to parse L2 line: '{line_l2}'")
                     else:
-                         logger.info(f"Level 2: No similar channels found or parsed for {channel_entity_l1}.")
+                        logger.info(f"No L2 results for {peer_l1}.")
 
-                    delay = getattr(config, 'DELAY_BETWEEN_REQUESTS', 1.5)
-                    logger.debug(f"Waiting for {delay} seconds before next L2 request...")
+                    delay = getattr(config, "DELAY_BETWEEN_REQUESTS", 1.5)
+                    logger.debug(f"Waiting {delay}s before next L2 request…")
                     await asyncio.sleep(delay)
 
-                # --- Filter, Deduplicate Level 2 data and Write to CSV after the loop ---
+                # Filter & deduplicate and write CSV
                 if level2_data_for_csv:
-                    unique_level2_data_filtered = []
+                    unique_filtered = []
                     seen_usernames = set()
-                    filtered_out_count = 0
-                    duplicate_count = 0
+                    filtered_out = 0
+                    duplicates = 0
 
-                    logger.info(f"Filtering and deduplicating {len(level2_data_for_csv)} collected L2 results...")
+                    logger.info(f"Filtering {len(level2_data_for_csv)} Level 2 entries…")
+                    for row in level2_data_for_csv:
+                        uname = row["found_l2_username"]
+                        cnt = row["found_l2_count"]
 
-                    for row_data in level2_data_for_csv:
-                        l2_username = row_data.get('found_l2_username')
-                        l2_count = row_data.get('found_l2_count', 0)
-
-                        # Filter by subscriber count >= 1000
-                        if l2_count < 1000:
-                            filtered_out_count += 1
+                        # Only keep >= 1000 subscribers
+                        if cnt < 1000:
+                            filtered_out += 1
                             continue
 
-                        if l2_username and l2_username != 'N/A':
-                            if l2_username not in seen_usernames:
-                                unique_level2_data_filtered.append(row_data)
-                                seen_usernames.add(l2_username)
+                        if uname and uname != "N/A":
+                            if uname not in seen_usernames:
+                                unique_filtered.append(row)
+                                seen_usernames.add(uname)
                             else:
-                                duplicate_count += 1
-                        elif not l2_username or l2_username == 'N/A':
-                             logger.warning(f"Skipping row during deduplication due to invalid username: {row_data}")
+                                duplicates += 1
+                        else:
+                            logger.warning(f"Skipping invalid username in L2 data: {row}")
 
-                    logger.info(f"Filtering complete: Kept {len(unique_level2_data_filtered)} channels (>1k subs, unique). "
-                                f"Filtered out {filtered_out_count} (<1k subs). Found {duplicate_count} duplicates (>1k subs).")
+                    logger.info(
+                        f"Filtered: kept {len(unique_filtered)}, removed {filtered_out} (<1k), "
+                        f"duplicates skipped: {duplicates}"
+                    )
 
-                    if unique_level2_data_filtered:
-                        csv_filename = (saving_dir_base / f"{safe_filename_l0}_level2_report").with_suffix(".csv")
-                        logger.info(f"Writing {len(unique_level2_data_filtered)} unique & filtered Level 2 results to CSV: {csv_filename}")
+                    if unique_filtered:
+                        csv_file = (saving_dir_base / f"{safe_filename_l0}_level2_report").with_suffix(".csv")
+                        logger.info(f"Writing {len(unique_filtered)} to CSV: {csv_file}")
                         try:
-                            with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
-                                # *** CHANGED: Added 'Тематика' fieldname ***
-                                fieldnames = ['Исходный канал', 'Ссылка', 'Кол-во подписчиков', 'Название канала', 'Тематика', 'Каналы >50k (Ссылка)']
+                            with open(csv_file, "w", newline="", encoding="utf-8-sig") as csvfile:
+                                fieldnames = [
+                                    "Исходный канал",
+                                    "Ссылка",
+                                    "Кол-во подписчиков",
+                                    "Название канала",
+                                    "Тематика",
+                                    "Каналы >50k (Ссылка)"
+                                ]
                                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-
                                 writer.writeheader()
-                                for row_data in unique_level2_data_filtered:
-                                    l2_username = row_data['found_l2_username']
-                                    l2_title = row_data['found_l2_title']
-                                    l2_count = row_data['found_l2_count']
-
-                                    full_url = f"https://t.me/{l2_username}" if l2_username and l2_username != 'N/A' else ''
-
-                                    # *** ADDED: Determine topic ***
-                                    topic = get_channel_topic(l2_title)
-
-                                    channel_over_50k_url = ''
-                                    if l2_count >= 50000:
-                                        channel_over_50k_url = full_url
-
+                                for row in unique_filtered:
+                                    uname = row["found_l2_username"]
+                                    title = row["found_l2_title"]
+                                    cnt = row["found_l2_count"]
+                                    full_url = f"https://t.me/{uname}" if uname != "N/A" else ""
+                                    topic = get_channel_topic(title)
+                                    over_50k_url = full_url if cnt >= 50000 else ""
                                     writer.writerow({
-                                        'Исходный канал': row_data['source_l1'],
-                                        'Ссылка': full_url,
-                                        'Кол-во подписчиков': l2_count,
-                                        'Название канала': l2_title,
-                                        'Тематика': topic, # Write the determined topic
-                                        'Каналы >50k (Ссылка)': channel_over_50k_url
+                                        "Исходный канал": row["source_l1"],
+                                        "Ссылка": full_url,
+                                        "Кол-во подписчиков": cnt,
+                                        "Название канала": title,
+                                        "Тематика": topic,
+                                        "Каналы >50k (Ссылка)": over_50k_url
                                     })
-                            logger.success(f"Successfully wrote unique & filtered Level 2 results to {csv_filename}")
-                        except IOError as e:
-                            logger.error(f"Failed to write CSV file {csv_filename}: {e}")
+                            logger.success(f"CSV written: {csv_file}")
                         except Exception as e:
-                            logger.error(f"An unexpected error occurred while writing CSV {csv_filename}: {e}")
+                            logger.error(f"Failed to write CSV {csv_file}: {e}")
                     else:
-                         logger.warning(f"No unique Level 2 data remaining after filtering (>1k subs) for {channel_username_l0}.")
-
+                        logger.warning(f"No unique Level 2 data for CSV for {channel_username_l0}.")
                 else:
-                    logger.warning(f"No Level 2 data collected to write to CSV for {channel_username_l0}.")
+                    logger.warning(f"No Level 2 data collected for {channel_username_l0}.")
 
-
-                logger.success(f"--- Finished Level 2 Parsing for channels related to {channel_username_l0}. Attempted {parsed_l2_count} L1 channels, found {total_l2_channels_found} L2 channels in total (before filtering & deduplication). ---")
+                logger.success(
+                    f"--- Finished Level 2 for {channel_username_l0}: "
+                    f"checked {parsed_l2_count} L1 channels, found {total_l2_found} total L2 channels (before filtering) ---"
+                )
 
         except KeyboardInterrupt:
-             logger.info("Process interrupted by user.")
+            logger.info("Interrupted by user.")
         except Exception as e:
-             logger.exception(f"An unexpected error occurred in the main loop: {e}")
+            logger.exception(f"Unexpected error in main loop: {e}")
         finally:
-            if self.client and self.client.is_connected():
-                logger.info("Disconnecting Telegram client...")
+            if self.client and await self.client.is_connected():
+                logger.info("Disconnecting Telegram client…")
                 try:
                     await self.client.disconnect()
-                    logger.info("Telegram client disconnected.")
+                    logger.info("Client disconnected.")
                 except Exception as e:
-                    logger.error(f"Error during client disconnection: {e}")
+                    logger.error(f"Error during disconnect: {e}")
 
 
 if __name__ == "__main__":
@@ -399,16 +438,15 @@ if __name__ == "__main__":
     try:
         asyncio.run(parser.main())
     except Exception as e:
-         logger.critical(f"Application failed to run: {e}")
-         if hasattr(parser, 'client') and parser.client.is_connected:
-             logger.warning("Attempting emergency client disconnection...")
-             try:
-                 loop = asyncio.get_event_loop_policy().get_event_loop()
-                 if loop.is_running():
-                      loop.create_task(parser.client.disconnect())
-                 else:
-                      loop.run_until_complete(parser.client.disconnect())
-                 logger.info("Emergency disconnection successful.")
-             except Exception as disconnect_err:
-                 logger.error(f"Error during emergency disconnection: {disconnect_err}")
-
+        logger.critical(f"Application failed: {e}")
+        if hasattr(parser, "client") and parser.client.is_connected():
+            logger.warning("Attempting emergency disconnection…")
+            try:
+                loop = asyncio.get_event_loop_policy().get_event_loop()
+                if loop.is_running():
+                    loop.create_task(parser.client.disconnect())
+                else:
+                    loop.run_until_complete(parser.client.disconnect())
+                logger.info("Emergency disconnection successful.")
+            except Exception as disconnect_err:
+                logger.error(f"Error during emergency disconnect: {disconnect_err}")
