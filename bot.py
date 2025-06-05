@@ -9,13 +9,22 @@ Make sure to provide ``BOT_TOKEN`` in your ``.env`` file.
 """
 
 import asyncio
+import sys
 from io import BytesIO
+
+from loguru import logger
 
 from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
+)
+
+logger.remove()
+logger.add(
+    sink=sys.stderr,
+    format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> - <level>{message}</level>",
 )
 
 import config
@@ -27,6 +36,7 @@ parser = SimilarChannelParser()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Sends a greeting and brief instructions."""
+    logger.info("/start from %s", update.effective_user.id)
     await update.message.reply_text(
         "Привет! Этот бот ищет похожие телеграм‑каналы. "
         "Используйте /parse <канал> чтобы начать."
@@ -35,6 +45,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Explains available commands."""
+    logger.info("/help from %s", update.effective_user.id)
     await update.message.reply_text(
         "/parse <канал> – найти похожие каналы\n"
         "/help – показать это сообщение"
@@ -48,12 +59,14 @@ async def parse_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     username = context.args[0]
+    logger.info("/parse %s from %s", username, update.effective_user.id)
 
     progress = await update.message.reply_text("Собираю похожие каналы...")
 
     try:
         channels = await parser.get_similar_channels(username)
     except Exception as exc:  # pragma: no cover - network call
+        logger.error("Failed to fetch channels for %s: %s", username, exc)
         await update.message.reply_text(f"Error: {exc}")
         await progress.delete()
         return
@@ -62,6 +75,7 @@ async def parse_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text("No similar channels found.")
         await progress.delete()
         return
+    logger.info("Found %d channels for %s", len(channels), username)
 
     text = "\n".join(channels)
     if len(text) < 4000:
@@ -73,10 +87,12 @@ async def parse_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         buffer.name = "channels.txt"
         await progress.delete()
         await update.message.reply_document(buffer)
+    logger.info("Results sent for %s", username)
 
 
 async def main() -> None:
     """Runs the Telegram bot."""
+    logger.info("Connecting to Telegram API")
     await parser.connect()
 
     application = ApplicationBuilder().token(config.BOT_TOKEN).build()
@@ -87,6 +103,7 @@ async def main() -> None:
 
     await application.initialize()
     await application.start()
+    logger.info("Bot started")
     await application.updater.start_polling()
     await application.updater.idle()
 
