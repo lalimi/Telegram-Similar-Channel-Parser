@@ -19,6 +19,8 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 logger.remove()
@@ -90,6 +92,13 @@ async def parse_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.info("Results sent for %s", username)
 
 
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Echoes any text message and logs what was received."""
+    text = update.message.text or ""
+    logger.info("Echo handler received text: %s", text)
+    await update.message.reply_text(text)
+
+
 async def main() -> None:
     """Runs the Telegram bot."""
     logger.info("Connecting to Telegram API")
@@ -100,6 +109,7 @@ async def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("parse", parse_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     await application.initialize()
     await application.start()

@@ -33,6 +33,7 @@ So basic script, about 100 code lines, simple to use.
 The bot supports `/start` and `/help` for instructions.
 Use `/parse <channel>` to begin parsing. The bot will show a short
 "collecting" message, delete it when done, and then send you the results.
+It also echoes any text you send and logs the received message.
 Log messages are printed to the console so you can follow the process.
 
 Enjoy.
