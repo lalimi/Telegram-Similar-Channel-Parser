@@ -1,15 +1,15 @@
 """Simple Telegram bot integration for the Similar Channel Parser.
 
-This bot accepts the ``/parse`` command with a channel username and
-responds with a list of similar channels.  It reuses the
-``SimilarChannelParser`` class from ``main.py``.
+This bot accepts commands to interact with the parser.
+``/parse`` – получить список похожих каналов.
+``/start`` и ``/help`` – вывести подсказку.
+It reuses the ``SimilarChannelParser`` class from ``main.py``.
 
 Make sure to provide ``BOT_TOKEN`` in your ``.env`` file.
 """
 
 import asyncio
 from io import BytesIO
-from typing import List
 
 from telegram import Update
 from telegram.ext import (
@@ -26,9 +26,18 @@ parser = SimilarChannelParser()
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Sends a simple greeting and usage hint."""
+    """Sends a greeting and brief instructions."""
     await update.message.reply_text(
-        "Send /parse <channel_username> to get a list of similar channels."
+        "Привет! Этот бот ищет похожие телеграм‑каналы. "
+        "Используйте /parse <канал> чтобы начать."
+    )
+
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Explains available commands."""
+    await update.message.reply_text(
+        "/parse <канал> – найти похожие каналы\n"
+        "/help – показать это сообщение"
     )
 
 
@@ -40,23 +49,29 @@ async def parse_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     username = context.args[0]
 
+    progress = await update.message.reply_text("Собираю похожие каналы...")
+
     try:
         channels = await parser.get_similar_channels(username)
     except Exception as exc:  # pragma: no cover - network call
         await update.message.reply_text(f"Error: {exc}")
+        await progress.delete()
         return
 
     if not channels:
         await update.message.reply_text("No similar channels found.")
+        await progress.delete()
         return
 
     text = "\n".join(channels)
     if len(text) < 4000:
+        await progress.delete()
         await update.message.reply_text(text)
     else:
         # If there are many channels, send them as a text file
         buffer = BytesIO(text.encode("utf-8"))
         buffer.name = "channels.txt"
+        await progress.delete()
         await update.message.reply_document(buffer)
 
 
@@ -67,6 +82,7 @@ async def main() -> None:
     application = ApplicationBuilder().token(config.BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("parse", parse_command))
 
     await application.initialize()
